@@ -1,0 +1,104 @@
+# =============================================================================
+# RENAME WORKSHEET
+# Edit the values on the RIGHT of `=` only. Leave a value unchanged if you
+# don't want to rename it. Save the file and tell me "rename done" when ready.
+#
+# Lowercase letters, digits, and dashes are safest for cloud resource names.
+# I'll validate every value before I touch the CDK code.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. PROJECT IDENTITY (most things derive from this)
+# -----------------------------------------------------------------------------
+
+# CloudFormation stack name (PascalCase, alphanumeric)
+stack_name                   = AgenticPromptValidatorStack
+
+# Short prefix used in resource names (3-8 chars, lowercase + digits)
+# Used for Bedrock agents, S3 bucket, DDB table, etc.
+short_prefix                 = apv
+
+# CDK qualifier (3-10 chars, lowercase letters + digits)
+# Used in bootstrap stack and staging bucket name
+cdk_qualifier                = apv
+
+# CDK bootstrap (toolkit) stack name
+cdk_toolkit_stack            = CDKToolkit-apv
+
+
+# -----------------------------------------------------------------------------
+# 2. BEDROCK AGENTS (3 agents, each with a "live" alias)
+# -----------------------------------------------------------------------------
+
+# Token-efficiency check agent (Haiku 4.5)
+token_agent_name             = apv-token-check
+token_agent_alias            = live
+
+# Clarity check agent (Sonnet 4.5)
+clarity_agent_name           = apv-clarity-check
+clarity_agent_alias          = live
+
+# Safety check agent (Sonnet 4.5)
+safety_agent_name            = apv-safety-check
+safety_agent_alias           = live
+
+
+# -----------------------------------------------------------------------------
+# 3. CORE DATA RESOURCES (currently auto-generated; set explicit names if you
+#    want predictable ARNs you can hardcode in dashboards)
+# -----------------------------------------------------------------------------
+
+# S3 bucket (must be globally unique across all of AWS, lowercase, no underscore)
+# Leave blank to keep auto-generated. If set, must be unique worldwide.
+s3_bucket_name               = apv-prompts-storage
+
+# DynamoDB table (alphanumeric + dot, dash, underscore)
+# Leave blank to keep auto-generated.
+ddb_table_name               = apv-logs
+
+# DynamoDB GSI for status queries
+ddb_gsi_name                 = GSI1_status
+
+
+# -----------------------------------------------------------------------------
+# 4. COMPUTE
+# -----------------------------------------------------------------------------
+
+# Lambda function names (alphanumeric + dash + underscore, max 64 chars)
+# Leave blank to keep auto-generated.
+intake_lambda_name           =apv-intake-lambda
+aggregator_lambda_name       =apv-aggregator-lambda
+refinement_lambda_name       =apv-refinement-lambda
+
+# Step Functions state machine
+# Leave blank to keep auto-generated.
+state_machine_name           =apv-state-machine
+
+
+# -----------------------------------------------------------------------------
+# 5. API GATEWAY
+# -----------------------------------------------------------------------------
+
+# REST API name (display name in console)
+api_name                     = agentic-prompt-validator-api
+
+# Stage name (appears in URL path: https://...amazonaws.com/<stage>/prompts)
+api_stage                    = APV
+
+
+# -----------------------------------------------------------------------------
+# 6. IAM (advanced — usually safe to leave auto-generated)
+# -----------------------------------------------------------------------------
+
+# Leave any of these blank to keep auto-generated names.
+bedrock_agent_role_name      =apv-bedrock-agent-role
+intake_lambda_role_name      =apv-intake-lambda-role
+aggregator_lambda_role_name  =apv-aggregator-lambda-role
+refinement_lambda_role_name  =apv-refinement-lambda-role
+state_machine_role_name      =apv-state-machine-lambda-role
+
+
+# =============================================================================
+# END — save and tell me "rename done"
+# =============================================================================

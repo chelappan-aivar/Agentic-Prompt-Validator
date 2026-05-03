@@ -1,0 +1,38 @@
+{
+  "domain": "technical",
+  "display_name": "Technical / Engineering",
+  "token_budget": { "min": 100, "max": 400 },
+  "pii_risks": [
+    "API keys or secrets embedded in prompt",
+    "database connection strings with credentials",
+    "internal IP addresses or hostnames",
+    "employee names tied to internal system access",
+    "customer data in example payloads"
+  ],
+  "compliance": [
+    "No real credentials, tokens, or secrets — use placeholders: <API_KEY>, <DB_PASSWORD>",
+    "No internal hostnames or IP addresses — use example.com or 192.0.2.x (RFC 5737)",
+    "No customer PII in example data or test payloads",
+    "Open-source licence compliance if asking for code generation"
+  ],
+  "clarity_requirements": [
+    "Specify programming language and version (e.g., Python 3.12, TypeScript 5.x)",
+    "Specify framework or library (e.g., FastAPI, React 18, Next.js 14)",
+    "Specify runtime/platform (e.g., AWS Lambda, Node.js 20, Docker)",
+    "State whether you want explanation, just code, or both",
+    "Specify error handling expectations (raise, return error object, log)",
+    "Specify test requirements if applicable (unit, integration, coverage target)"
+  ],
+  "tone": "Precise, technical, unambiguous. Use domain-standard terminology.",
+  "good_patterns": [
+    "Write a Python 3.12 AWS Lambda handler that reads a JSON event, validates required fields using Pydantic v2, and returns a 400 error with field-level detail on validation failure:",
+    "Refactor the following TypeScript function to use async/await instead of promise chains, preserving the existing error handling behaviour:",
+    "Write a SQL query (PostgreSQL 15) that returns the top 10 customers by revenue in the last 30 days, with a fallback for customers with no orders:"
+  ],
+  "bad_patterns": [
+    "Write me some code",
+    "Fix my bug (no code provided)",
+    "Connect to my database at 10.0.1.5 with password abc123",
+    "Use API key sk-abc123xyz to call this endpoint"
+  ]
+}

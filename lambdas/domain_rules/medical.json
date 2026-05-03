@@ -1,0 +1,40 @@
+{
+  "domain": "medical",
+  "display_name": "Medical / Clinical",
+  "token_budget": { "min": 150, "max": 450 },
+  "pii_risks": [
+    "patient full name",
+    "date of birth",
+    "medical record number (MRN)",
+    "social security number",
+    "health insurance member ID",
+    "specific diagnosis combined with name",
+    "exact medication + dosage + patient name",
+    "home address of patient"
+  ],
+  "compliance": [
+    "HIPAA — do not include patient-identifiable information",
+    "No specific diagnoses or treatment plans for real patients",
+    "No specific drug dosages presented as advice",
+    "Clinical decision support only — not a substitute for professional judgement"
+  ],
+  "clarity_requirements": [
+    "Specify patient population or case type (e.g., adult, paediatric, ICU)",
+    "State the clinical context (e.g., outpatient, emergency, chronic care)",
+    "Specify output format (SOAP note, differential list, discharge summary)",
+    "Indicate level of clinical detail required"
+  ],
+  "tone": "Objective, clinical, precise. Third-person preferred.",
+  "good_patterns": [
+    "Summarise the following de-identified clinical note in SOAP format:",
+    "Extract ICD-10 codes from the following clinical documentation:",
+    "List the top 5 differentials for a 45-year-old presenting with chest pain and diaphoresis:",
+    "Translate the following discharge summary into patient-friendly language (grade 6 reading level):"
+  ],
+  "bad_patterns": [
+    "What medication should I give John Smith for his diabetes?",
+    "Tell me if my patient (DOB 12/03/1978, MRN 4456221) has cancer",
+    "Should I prescribe 50mg metformin or 100mg?",
+    "Diagnose this person based on their symptoms"
+  ]
+}

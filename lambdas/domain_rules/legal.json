@@ -1,0 +1,36 @@
+{
+  "domain": "legal",
+  "display_name": "Legal / Compliance",
+  "token_budget": { "min": 200, "max": 600 },
+  "pii_risks": [
+    "client full name combined with case details",
+    "case numbers tied to identifiable individuals",
+    "confidential settlement figures",
+    "personally identifiable details in legal documents"
+  ],
+  "compliance": [
+    "Avoid framing that implies attorney-client privilege is being established",
+    "No jurisdiction-specific advice presented as definitive legal opinion",
+    "Regulatory references should cite jurisdiction (e.g., UK GDPR, US SEC Rule 10b-5)",
+    "Distinguish clearly between legal information and legal advice"
+  ],
+  "clarity_requirements": [
+    "Specify jurisdiction (e.g., England & Wales, New York State, EU)",
+    "State the legal domain (contract law, employment, IP, M&A, compliance)",
+    "Specify the audience (in-house counsel, external client, lay person)",
+    "Specify the output (memo, clause draft, risk summary, plain-language explanation)"
+  ],
+  "tone": "Formal, precise, hedged where appropriate. Avoid absolute statements on unsettled law.",
+  "good_patterns": [
+    "Draft a non-disclosure agreement clause for a SaaS vendor relationship under English law:",
+    "Summarise the key obligations under GDPR Article 28 for a data processor:",
+    "List the material conditions for a valid contract under California law:",
+    "Identify potential IP risks in the following product description (UK jurisdiction):"
+  ],
+  "bad_patterns": [
+    "Tell me if I'll win my lawsuit",
+    "Should I sign this contract? [paste entire contract]",
+    "Is my employer breaking the law?",
+    "How do I avoid paying taxes legally in [country]?"
+  ]
+}

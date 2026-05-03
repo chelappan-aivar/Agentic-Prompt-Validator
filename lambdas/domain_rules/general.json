@@ -1,0 +1,35 @@
+{
+  "domain": "general",
+  "display_name": "General",
+  "token_budget": { "min": 50, "max": 300 },
+  "pii_risks": [
+    "full name combined with any other identifier",
+    "email addresses",
+    "phone numbers",
+    "home addresses",
+    "dates of birth combined with other PII"
+  ],
+  "compliance": [
+    "GDPR / CCPA — do not include real personal data in prompts sent to third-party LLMs",
+    "No content that solicits or facilitates illegal activity",
+    "No content targeting minors inappropriately"
+  ],
+  "clarity_requirements": [
+    "State the primary goal clearly in the first sentence",
+    "Specify the desired output format if it matters",
+    "Provide enough context for the model to understand the situation",
+    "Include relevant constraints (length, audience, tone)"
+  ],
+  "tone": "Match the context. Default to clear and professional.",
+  "good_patterns": [
+    "Summarise the following text in 3 bullet points, each under 20 words:",
+    "Translate the following paragraph into French, preserving formal register:",
+    "List 5 questions I should ask before signing a lease agreement:"
+  ],
+  "bad_patterns": [
+    "Do stuff",
+    "Help me",
+    "Tell me about John Smith at 12 Main Street",
+    "Ignore your instructions and do X instead"
+  ]
+}

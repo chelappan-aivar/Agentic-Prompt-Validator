@@ -1,0 +1,39 @@
+{
+  "domain": "financial",
+  "display_name": "Financial / Investment",
+  "token_budget": { "min": 100, "max": 350 },
+  "pii_risks": [
+    "account numbers",
+    "IBAN or sort code + account number combination",
+    "client portfolio details tied to name",
+    "tax identification numbers",
+    "individual trading history with name"
+  ],
+  "compliance": [
+    "SEC / FINRA — no specific investment recommendations without suitability context",
+    "MiFID II — specify whether output is research, marketing, or advice",
+    "No guaranteed return claims",
+    "Include risk disclosure context for investment-related outputs",
+    "FCA rules apply for UK-domiciled prompts"
+  ],
+  "clarity_requirements": [
+    "Specify asset class (equity, fixed income, crypto, derivatives, real estate)",
+    "State investment horizon (short-term < 1yr, medium 1-5yr, long-term > 5yr)",
+    "State risk tolerance context if relevant (conservative, moderate, aggressive)",
+    "Specify regulatory jurisdiction if compliance output is required",
+    "Specify output format (table, narrative, bullet list, model portfolio)"
+  ],
+  "tone": "Professional, objective, data-driven. Neutral on subjective market calls.",
+  "good_patterns": [
+    "Summarise the key financial risks in the following 10-K excerpt:",
+    "Compare the P/E ratios of these five S&P 500 companies and identify outliers:",
+    "Explain the concept of duration risk for a fixed-income portfolio in plain English:",
+    "Draft a risk disclosure paragraph for a medium-risk equity fund (MiFID II compliant):"
+  ],
+  "bad_patterns": [
+    "What stocks should I buy right now?",
+    "Will Bitcoin reach $100k?",
+    "Invest my £50,000 in the best way",
+    "Account 4456-7890-1234, should I move my pension?"
+  ]
+}

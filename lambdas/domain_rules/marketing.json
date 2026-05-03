@@ -1,0 +1,35 @@
+{
+  "domain": "marketing",
+  "display_name": "Marketing / Copywriting",
+  "token_budget": { "min": 80, "max": 250 },
+  "pii_risks": [
+    "customer names in personalisation prompts without consent flag",
+    "email addresses embedded in prompt",
+    "purchase history tied to identifiable customer"
+  ],
+  "compliance": [
+    "CAN-SPAM / GDPR — email marketing prompts must not target without consent context",
+    "ASA / FTC — claims must be substantiated; no misleading superlatives without evidence",
+    "No deceptive urgency or dark patterns in copy",
+    "Children's advertising rules apply for prompts targeting under-13 audience"
+  ],
+  "clarity_requirements": [
+    "Specify target audience (demographics, psychographics, buyer persona)",
+    "Specify channel (email, social post, landing page, ad copy, blog, video script)",
+    "Specify brand voice (formal, playful, authoritative, empathetic)",
+    "Specify primary CTA (sign up, buy now, learn more, download)",
+    "Specify word or character count limit if applicable"
+  ],
+  "tone": "Match brand voice specified. If not specified, default to professional-friendly.",
+  "good_patterns": [
+    "Write a 150-word email subject line and preview text for a SaaS product re-engagement campaign targeting lapsed users (B2B, professional tone, CTA: book a demo):",
+    "Create 3 Facebook ad headline variants for a D2C skincare brand targeting women 25-40, focusing on the benefit of clearer skin in 30 days:",
+    "Draft a landing page hero section (headline + subheadline + CTA button) for a project management tool aimed at remote engineering teams:"
+  ],
+  "bad_patterns": [
+    "Write me an ad",
+    "Make this viral",
+    "Send a marketing email to user@example.com",
+    "Write copy that tricks people into buying"
+  ]
+}
