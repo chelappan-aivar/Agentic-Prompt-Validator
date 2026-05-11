@@ -432,12 +432,44 @@ def _safety_check(prompt, domain):
     return parsed, _tag_usage(usage, "sonnet")
 
 
-def _suggest(prompt, domain):
-    text, usage = _converse(
-        SONNET, SUGGEST_SYSTEM,
-        f"Domain: {domain}\n\nPrompt to improve:\n---\n{prompt}\n---",
-        max_tokens=1000,
-    )
+def _build_scorer_findings(scores):
+    """Serialize scorer results into a concise block for the suggester's user message."""
+    lines = []
+    for name, data in scores.items():
+        header = f"[{name.upper()} — score={data.get('score', '?')}, severity={data.get('severity', '?')}]"
+        lines.append(header)
+        for issue in (data.get("issues") or [])[:3]:
+            lines.append(f"  Issue: {issue}")
+        for fix in (data.get("suggestions") or [])[:2]:
+            lines.append(f"  Fix: {fix}")
+        if name == "safety":
+            flags = [
+                label
+                for key, label in [
+                    ("pii_found", "PII detected"),
+                    ("injection_risk", "injection risk"),
+                    ("bias_risk", "bias risk"),
+                    ("compliance_flag", "compliance flag"),
+                ]
+                if data.get(key)
+            ]
+            if flags:
+                lines.append(f"  Flags: {', '.join(flags)}")
+        if name == "clarity":
+            if data.get("intent_clear") is False:
+                lines.append("  Flag: intent not clear")
+            if data.get("format_specified") is False:
+                lines.append("  Flag: output format not specified")
+    return "\n".join(lines)
+
+
+def _suggest(prompt, domain, scorer_findings=None):
+    user_msg = f"Domain: {domain}\n"
+    if scorer_findings:
+        user_msg += f"\nSCORER FINDINGS — address each issue in your rewrite:\n{scorer_findings}\n"
+    user_msg += f"\nPrompt to improve:\n---\n{prompt}\n---"
+
+    text, usage = _converse(SONNET, SUGGEST_SYSTEM, user_msg, max_tokens=1000)
     cleaned = text.strip()
     for wrap in ('"""', "'''", "```"):
         if cleaned.startswith(wrap) and cleaned.endswith(wrap):
@@ -448,37 +480,39 @@ def _suggest(prompt, domain):
 
 
 def _run_tools_parallel(prompt, domain):
-    """Run 3 scoring tools and the suggester in parallel, collecting per-call token usage."""
+    """Phase 1: run 3 scorers in parallel. Phase 2: run suggester with their findings."""
     scores = {}
-    call_usage = {}  # call_name -> usage dict
+    call_usage = {}
     suggestion = ""
+
+    # Phase 1 — scorers in parallel
     tool_fns = {
         "token":   lambda: _token_check(prompt, domain),
         "clarity": lambda: _clarity_check(prompt, domain),
         "safety":  lambda: _safety_check(prompt, domain),
     }
-    with cf.ThreadPoolExecutor(max_workers=4) as pool:
+    with cf.ThreadPoolExecutor(max_workers=3) as pool:
         score_futs = {pool.submit(fn): name for name, fn in tool_fns.items()}
-        sugg_fut = pool.submit(_suggest, prompt, domain)
-        for fut in cf.as_completed(list(score_futs) + [sugg_fut]):
-            if fut is sugg_fut:
-                try:
-                    suggestion, u = fut.result()
-                    call_usage["suggest"] = u
-                except Exception as e:  # noqa: BLE001
-                    print(f"[aggregator] suggest tool failed: {e!r}")
-                    suggestion = ""
-                    call_usage["suggest"] = _tag_usage(_zero_usage(), "sonnet")
-            else:
-                name = score_futs[fut]
-                try:
-                    result, u = fut.result()
-                    scores[name] = result
-                    call_usage[name] = u
-                except Exception as e:  # noqa: BLE001
-                    print(f"[aggregator] {name} tool failed: {e!r}")
-                    scores[name] = {"score": 0.0, "severity": "HIGH", "issues": [f"tool error: {e}"]}
-                    call_usage[name] = _tag_usage(_zero_usage(), "haiku" if name == "token" else "sonnet")
+        for fut in cf.as_completed(score_futs):
+            name = score_futs[fut]
+            try:
+                result, u = fut.result()
+                scores[name] = result
+                call_usage[name] = u
+            except Exception as e:  # noqa: BLE001
+                print(f"[aggregator] {name} tool failed: {e!r}")
+                scores[name] = {"score": 0.0, "severity": "HIGH", "issues": [f"tool error: {e}"]}
+                call_usage[name] = _tag_usage(_zero_usage(), "haiku" if name == "token" else "sonnet")
+
+    # Phase 2 — suggester with scorer findings injected
+    try:
+        suggestion, u = _suggest(prompt, domain, _build_scorer_findings(scores))
+        call_usage["suggest"] = u
+    except Exception as e:  # noqa: BLE001
+        print(f"[aggregator] suggest tool failed: {e!r}")
+        suggestion = ""
+        call_usage["suggest"] = _tag_usage(_zero_usage(), "sonnet")
+
     return scores, suggestion, call_usage
 
 

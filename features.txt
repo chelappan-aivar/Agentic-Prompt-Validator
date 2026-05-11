@@ -1,0 +1,109 @@
+================================================================================
+AGENTIC PROMPT VALIDATOR — FEATURE CARD
+================================================================================
+
+ 1. Three specialist Bedrock agents score every prompt in parallel — token efficiency, intent clarity, and safety/PII — instead of one fuzzy LLM-as-a-judge verdict.
+
+ 2. Domain-aware scoring across six domains (medical, legal, financial, marketing, technical, general), each with its own token budget, PII rules, compliance flags, and clarity requirements.
+
+ 3. Composite score (0.25·token + 0.35·clarity + 0.40·safety) plus severity (LOW/MED/HIGH) plus self-verified confidence drives a three-way routing decision: approve / refine / human review.
+
+ 4. Closed-loop auto-refinement — a fourth Bedrock agent rewrites the prompt and re-runs the scoring up to 3 iterations, so you get a fixed prompt, not just a failing grade.
+
+ 5. True human-in-the-loop using Step Functions waitForTaskToken — the workflow pauses on the review queue and resumes the moment a reviewer approves, rejects, or edits, with full state preserved.
+
+ 6. AI-suggested rewrite panel shows before/after token and character counts so reviewers can see exactly what would be sent to the LLM instead, and copy it with one click.
+
+ 7. Editable domain rule packs — token budgets, PII patterns, compliance rules, and good/bad patterns are tunable from the UI without a redeploy; compliance and product teams own the rules, not engineering.
+
+ 8. Full per-prompt audit trail — every iteration's scores, agent reasoning, severity flags, and rewrite diffs are persisted to DynamoDB and S3, suitable for HIPAA / GDPR / SOC2 evidence collection.
+
+ 9. Approved-prompts library and review queue with optimistic UI, live polling, and confirm-before-delete on destructive actions — built for actual ops use, not just a demo.
+
+10. Serverless on AWS — Bedrock + Lambda + Step Functions + DynamoDB + S3 + Amplify hosting; ~$1–2/month idle, ~$0.005–0.015 per prompt iteration, pay only for what you score.
+
+
+================================================================================
+WHY THIS BEATS OFF-THE-SHELF PROMPT VALIDATORS
+================================================================================
+
+ 1. SPECIALIZATION OVER GENERALIZATION — three specialized agents run in parallel, each focused on one dimension, so token bloat doesn't drown out PII risk and a polished tone doesn't mask vague intent (specialization beats rubric collapse).
+
+ 2. DOMAIN-AWARE, NOT GENERIC — domain rule packs encode actual compliance norms, token budgets, and patterns per industry, and any team can edit them live with no PR required.
+
+ 3. CLOSED-LOOP REMEDIATION, NOT JUST SCORING — unlike Promptfoo, OpenAI Evals, or LangSmith that give you a number, the refinement-suggester rewrites the input and re-scores it up to three iterations, so the system improves prompts instead of just grading them.
+
+ 4. NATIVE HUMAN-IN-THE-LOOP — Step Functions waitForTaskToken pauses the workflow and resumes on a reviewer action (approve, reject, or edit-and-rerun), closing the loop deterministically with state instead of dumping uncertain prompts into a forgotten queue.
+
+ 5. THREE-GATE ROUTING, NOT BINARY PASS/FAIL — composite + severity + confidence are three independent gates that prevent both false-positive rejections of good prompts and false-negative approvals of risky ones, instead of forcing one bias like pass/fail tools.
+
+ 6. SELF-CONFIDENCE VERIFICATION — a fourth Haiku call validates the three agents' verdict and produces a confidence score; low confidence routes to humans, catching the LLM-self-judge's blind spots instead of trusting them blindly.
+
+ 7. COST-CALIBRATED MODEL CHOICE — Haiku 4.5 for cheap dimensions (token-check, confidence verify) and Sonnet 4.5 for nuanced ones (clarity, safety, refinement), avoiding the 10–30x cost of GPT-4-class models on every check with no quality gain on cheap dimensions.
+
+ 8. AUDIT-FIRST DESIGN — every score, flag, agent message, and rewrite diff is persisted in DynamoDB and S3 keyed by prompt_id, so compliance teams can answer "why was this prompt approved on March 4?" months later without new instrumentation.
+
+ 9. INFRASTRUCTURE YOU CONTROL — self-hosted on your AWS account (your data, VPC, IAM, KMS keys), not a SaaS shipping prompts to a third party — critical for regulated industries that can't send PHI/PII off-premises.
+
+10. PURPOSE-BUILT UX, NOT A LOGGING DASHBOARD — a submit form, live status gauge with per-agent panels, review queue with edit/approve/reject, approved-prompts library, domain rules editor, and cost dashboard — all designed for validating production prompts, not just observing them.
+
+
+================================================================================
+AWS RESOURCES USED
+================================================================================
+
+ AI / AGENTS
+   - Amazon Bedrock                       4 agents (token-check on Haiku 4.5;
+                                          clarity-check, safety-check, and
+                                          refinement-suggester on Sonnet 4.5)
+   - Bedrock AgentCore Runtime            container-hosted agent runtime
+                                          (apvPromptValidatorV2) on arm64
+
+ COMPUTE / ORCHESTRATION
+   - AWS Lambda                           apv-intake-lambda (REST API handler)
+                                          apv-aggregator-lambda (parallel agent
+                                            invoker + scorer)
+                                          apv-refinement-lambda (rewrite path)
+   - AWS Step Functions                   apv-state-machine (Standard workflow
+                                          with waitForTaskToken for human review)
+
+ STORAGE
+   - Amazon DynamoDB                      apv-logs (single-table; PK=pk, SK=sk)
+                                          + GSI1_status (review/approved queue)
+   - Amazon S3                            apv-prompts-storage (originals,
+                                          refinements, audit JSON, diff JSON;
+                                          versioned + encrypted + CORS)
+
+ API / EDGE
+   - Amazon API Gateway (REST)            agentic-prompt-validator-api,
+                                          stage APV; routes: POST/GET /prompts,
+                                          GET/DELETE /prompts/{id},
+                                          POST /prompts/{id}/review,
+                                          GET/PUT /rules/{domain}
+
+ CONTAINER / IMAGE
+   - Amazon ECR                           cdk-apv-container-assets-* repository
+                                          (arm64 image for AgentCore Runtime)
+
+ FRONTEND HOSTING
+   - AWS Amplify Hosting                  apv-frontend (Next.js static export,
+                                          deployed via zip upload)
+
+ IDENTITY / ACCESS
+   - AWS IAM                              5 named execution roles
+                                          (bedrock-agent, intake, aggregator,
+                                          refinement, state-machine)
+
+ INFRASTRUCTURE-AS-CODE
+   - AWS CloudFormation (via AWS CDK)     stack: AgenticPromptValidatorStack
+                                          bootstrap: CDKToolkit-apv (qualifier
+                                          'apv', isolated synthesizer)
+
+ OBSERVABILITY
+   - Amazon CloudWatch Logs               Lambda log groups + Step Functions
+                                          execution logs
+
+ REGION / ACCOUNT
+   - us-east-1 / 455162169375
+
+================================================================================

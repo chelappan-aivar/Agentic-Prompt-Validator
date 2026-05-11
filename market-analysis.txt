@@ -1,0 +1,309 @@
+================================================================================
+PROMPT VALIDATOR MARKET ANALYSIS — MAY 2026
+HOW TO POSITION THE AGENTIC PROMPT VALIDATOR AS A CATEGORY LEADER
+================================================================================
+
+
+1. THE MARKET, TODAY
+--------------------------------------------------------------------------------
+
+Today's "prompt validator" space splits into FOUR loosely overlapping categories.
+None of them combine all of: domain expertise + closed-loop fix + human-in-the-
+loop + audit-grade evidence + self-hosted. That gap is the opportunity.
+
+  CATEGORY A — Eval / observability platforms
+    Players: Promptfoo (acquired by OpenAI, March 2026), LangSmith, Braintrust,
+             Langfuse, Confident AI, Galileo, Helicone, PromptLayer, Adaline,
+             Maxim, Vellum
+    What they do well:
+       - Trace prompt → LLM → output across chains and agents
+       - Dataset / regression testing in CI/CD
+       - LLM-as-a-judge scoring against rubrics
+       - Prompt versioning and A/B testing
+    Where they're weak:
+       - Domain-agnostic — same rubric for medical and marketing
+       - Detect, don't fix — give a number, not a corrected prompt
+       - No native human-in-the-loop workflow with state preservation
+       - Audit logs are dashboards, not compliance evidence
+
+  CATEGORY B — Safety / guardrail platforms
+    Players: NVIDIA NeMo Guardrails, Lakera Guard, Patronus AI, LLM Guard,
+             PromptArmor, Robust Intelligence, CalypsoAI
+    What they do well:
+       - Real-time prompt-injection / jailbreak / PII detection
+       - Runtime input + output filtering
+       - Hallucination detection (Patronus)
+    Where they're weak:
+       - Detection-only — block or allow, no rewriting
+       - One-shot single-classifier; doesn't reason about clarity or efficiency
+       - Domain-blind — financial vs medical PII patterns are different
+       - Most are SaaS, raising data-residency concerns for regulated industries
+
+  CATEGORY C — Domain-specialized models / benchmarks (mostly research)
+    Players: Trident-Bench, FinSafetyBench, FinPromptCheckup, HSE-BENCH
+    What they show:
+       - Specialist models often FAIL on ethical nuance (Trident-Bench, 2025)
+       - Domain-specific jailbreaks exploit profession-specific terminology
+         and procedural workflows in finance and law
+    Where they're weak:
+       - Academic, not productized — no UI, no workflow, no integration
+       - Snapshot benchmarks, not living systems
+
+  CATEGORY D — DIY rubrics / spreadsheets / manual review
+    Still where most enterprises live in May 2026 according to LangChain's
+    State of Agent Engineering 2026.
+
+
+2. KEY 2026 MARKET SIGNALS
+--------------------------------------------------------------------------------
+
+  - OpenAI acquired Promptfoo (March 2026) — vendor consolidation; the strongest
+    open-source eval tool now sits inside one model provider's stack, creating
+    multi-vendor anxiety and an opening for neutral self-hosted alternatives.
+
+  - "Domain-Specific Language Models (DSLMs)" is the dominant 2026 narrative.
+    Cogent: "the end of the general-purpose LLM hype." Healthcare, legal,
+    financial, and regulated industries are the headline buyers.
+
+  - Gartner: 1,445% surge in multi-agent system inquiries (Q1 2024 → Q2 2025).
+    The market is ready to pay for agent-based architectures.
+
+  - Regulatory eval is becoming mandatory. EU AI Act, HIPAA reinterpretations
+    around membership-inference attacks, GDPR Article 22, sector-specific
+    compliance. Validation evidence is becoming an audit deliverable.
+
+  - Documented gaps in current validators (per multiple independent reviews):
+       (a) cost-efficiency and safety blended into one score
+       (b) drift monitoring (false-positive storms when thresholds miscalibrate)
+       (c) fine-grained, scalable, domain-aware evaluation
+    These are EXACTLY where this product is positioned.
+
+
+3. WHERE THE AGENTIC PROMPT VALIDATOR ALREADY LEADS
+--------------------------------------------------------------------------------
+
+   Capability                       APV   Promptfoo  Braintrust  Lakera  NeMo
+   ──────────────────────────────  ────  ─────────  ──────────  ──────  ────
+   Domain-aware rule packs           ✓        ✗          ✗         ~      ~
+   Editable rules, no redeploy       ✓        ✗          ~         ✗      ✗
+   Closed-loop auto-refinement       ✓        ✗          ✗         ✗      ✗
+   Multi-agent specialist scoring    ✓        ✗          ✗         ✗      ✗
+   Self-confidence verification      ✓        ✗          ✗         ✗      ✗
+   Human-in-the-loop with state      ✓        ✗          ~         ✗      ✗
+   Per-prompt audit trail (S3+DB)    ✓        ✗          ~         ~      ~
+   Self-hosted on customer cloud     ✓        ✓          ~         ✗      ✓
+   Severity + confidence routing     ✓        ✗          ✗         ✗      ✗
+
+   Legend: ✓ first-class  ~ partial / planned  ✗ not supported
+
+
+4. WHERE APV IS EXPOSED — THE HONEST GAPS
+--------------------------------------------------------------------------------
+
+   A.  No CI/CD gate or SDK — Promptfoo and Braintrust block merges on
+       regression. APV doesn't ship with a GitHub Action or pytest plugin.
+       Engineers can't add APV to their existing test pipeline today.
+
+   B.  No production gateway mode — Lakera and NeMo can sit between an app
+       and the LLM in real time. APV is async only (submit and poll).
+
+   C.  No drift / production telemetry — once a prompt is approved, APV
+       loses sight of it. Documented industry gap; we don't fill it yet.
+
+   D.  No batch / dataset evaluation — running APV across 10,000 historical
+       prompts would require shell loops. Competitors have datasets first-class.
+
+   E.  No prompt registry — versioning, comparison, rollback, and A/B
+       testing across versions don't exist.
+
+   F.  No output validation — APV scores INPUT prompts, not LLM responses.
+       Patronus, NeMo, and Lakera also do output filtering / hallucination
+       checks. We're half the workflow.
+
+   G.  No multi-language coverage — domain rules look English-centric. A
+       financial PII pattern in Mandarin or Spanish wouldn't trigger today.
+
+   H.  No red-team / adversarial generation — Promptfoo auto-generates
+       jailbreaks. We rely on user-submitted prompts to surface issues.
+
+   I.  No published compliance posture — SOC 2, HIPAA BAA, ISO 27001
+       certifications drive enterprise procurement. Self-hosting helps but
+       isn't a substitute.
+
+   J.  No SDK / no embeddable API client — the API exists but there's no
+       officially packaged Python/TypeScript client for engineers.
+
+
+5. THE STRATEGIC POSITIONING
+--------------------------------------------------------------------------------
+
+   ONE-LINE POSITIONING
+   "The compliance-grade prompt validator with domain expertise and closed-
+    loop remediation, self-hosted on your AWS account."
+
+   THREE PILLARS THAT NO COMPETITOR COMBINES
+
+   Pillar 1 — DOMAIN EXPERTISE AS A FIRST-CLASS PRIMITIVE
+     Most validators bolt domain knowledge on as a tag or filter. We make
+     it editable, versioned, and the PRIMARY axis of evaluation. Compliance
+     teams own and maintain rules, not engineers.
+
+   Pillar 2 — CLOSED-LOOP REMEDIATION, NOT JUST DETECTION
+     Detection without a fix forces every flagged prompt back to the human.
+     We auto-rewrite up to 3 iterations and only escalate the genuinely hard
+     cases. This is a 10-100x throughput multiplier for real ops teams.
+
+   Pillar 3 — AUDIT EVIDENCE, NOT JUST LOGS
+     Every score, agent message, severity flag, rewrite diff, and reviewer
+     action is persisted with cryptographic-friendly structure. We answer
+     "why was this prompt approved on March 4?" with a single record fetch.
+     Most observability tools hold this for 30-90 days; we hold it forever
+     in customer-controlled S3.
+
+   THE ENEMY POSITIONING
+     - vs Promptfoo: "OpenAI now owns Promptfoo. We're vendor-neutral,
+       self-hosted on YOUR cloud, with audit retention you control."
+     - vs LangSmith: "We don't lock you into LangChain. We work with any
+       prompt source, any model, any framework."
+     - vs Lakera/NeMo: "We don't just block. We rewrite. Detection alone
+       sends every flagged prompt back to a human. We auto-fix the easy 80%."
+     - vs Braintrust: "Domain expertise + human-in-the-loop with state, not
+       just CI/CD scoring."
+     - vs DIY spreadsheets: "Stop scoring in Notion. Get an auditable
+       multi-agent system in a week."
+
+
+6. PRIORITIZED PRODUCT ROADMAP TO WIDEN THE MOAT
+--------------------------------------------------------------------------------
+
+   TIER 1 — Ship in the next 30 days (closes the most painful gaps)
+
+     1. CI/CD INTEGRATION
+        Ship `apv-ci` as a GitHub Action + pytest plugin. Reads a
+        prompts.yml suite and runs each through the API; blocks PR on
+        regression below configurable thresholds. Mirrors Promptfoo's
+        biggest selling point inside our domain-aware engine.
+
+     2. PYTHON + TYPESCRIPT SDKs
+        Officially packaged clients with retries, batching, and types.
+        First-class developer experience is table stakes for adoption.
+
+     3. PRODUCTION GATEWAY MODE
+        OpenAI-compatible /v1/chat/completions proxy. Pre-validates the
+        prompt, returns the auto-fixed version (or original if approved),
+        then forwards to the real LLM. Drop-in replacement that turns APV
+        from a "review tool" into "infrastructure."
+
+     4. BATCH / DATASET EVALUATION
+        UI to upload a CSV, score every row in parallel, get a heatmap by
+        domain and severity. Lets enterprises trial APV on existing prompt
+        libraries without writing code.
+
+
+   TIER 2 — Ship in 60-90 days (open new market wedges)
+
+     5. OUTPUT VALIDATION (post-LLM)
+        Same multi-agent architecture, applied to LLM responses. Catches
+        hallucinations, PII leakage, off-policy answers. Closes the loop
+        end-to-end. Moves us into Patronus / NeMo territory.
+
+     6. DRIFT MONITORING DASHBOARD
+        Per-domain rolling stats on composite, severity, confidence. Alert
+        on regression. Solves the documented industry problem of
+        validators that work great on day 1 and decay silently.
+
+     7. PROMPT REGISTRY + VERSIONING
+        Save prompts as named, versioned artifacts. Diff scores across
+        versions. Rollback. Promotes APV from a one-shot scorer into a
+        prompt lifecycle platform.
+
+     8. RULE PACK MARKETPLACE
+        Third-party experts publish vertical rule packs (cardiology,
+        consumer-credit, M&A diligence, etc.) with reputation and updates.
+        Network effect. Single-handedly answers "but who wrote these
+        rules?" for procurement.
+
+
+   TIER 3 — Ship in 6 months (defensive depth)
+
+     9. RED-TEAM ENGINE
+        Domain-targeted adversarial prompt generation. Existing red-team
+        tools generate generic jailbreaks; ours would generate
+        domain-specific ones (medical: drug-dosing manipulation; finance:
+        tax-evasion phrasing). Genuinely novel.
+
+    10. MULTI-LANGUAGE PII + INJECTION PATTERNS
+        Mandarin, Spanish, Hindi, Arabic, French, German PII regexes and
+        injection signatures. Required for global enterprises.
+
+    11. COMPLIANCE EVIDENCE PACK
+        One-click export of a signed audit bundle (PDF + JSON) for a
+        prompt or date range, formatted for HIPAA / SOC 2 / EU AI Act
+        Article 14 evidence requirements.
+
+    12. MULTI-JUDGE CONSENSUS
+        Run scoring agents on two different model providers (Bedrock +
+        OpenAI, or Bedrock + Mistral) and surface disagreement. Sells
+        directly against the "but is your judge biased?" objection.
+
+
+7. POSITIONING ELEVATOR PITCH (FOR DEMOS / SLIDES)
+--------------------------------------------------------------------------------
+
+   "Most prompt validators give you a number. We give you a fixed prompt,
+    an audit trail, and a domain-tuned rubric your compliance team can
+    edit. Self-hosted on your AWS account, never on someone else's cloud.
+
+    Promptfoo got acquired by OpenAI. LangSmith locks you to LangChain.
+    Lakera sees your prompts. We sit on your infrastructure, run on
+    Bedrock, and ship evidence regulators can use.
+
+    Three specialist agents in parallel, a fourth that rewrites,
+    a human-in-the-loop queue that pauses Step Functions until a reviewer
+    decides, and an audit trail in S3 you control forever.
+
+    That's the difference between a scoring tool and an
+    enterprise prompt-governance system."
+
+
+================================================================================
+SOURCES (web research, May 2026)
+================================================================================
+
+  - Promptfoo (OpenAI acquisition, red-team, vulnerabilities):
+        https://github.com/promptfoo/promptfoo
+        https://pecollective.com/tools/promptfoo/
+  - Braintrust comparisons / pricing:
+        https://www.braintrust.dev/articles/best-prompt-evaluation-tools-2025
+        https://www.braintrust.dev/articles/best-prompt-management-tools-2026
+        https://www.braintrust.dev/articles/best-promptfoo-alternatives-2026
+  - LangSmith / LangChain ecosystem:
+        https://www.langchain.com/state-of-agent-engineering
+  - Langfuse self-host + pricing:
+        https://langfuse.com/docs/security-and-guardrails
+        https://checkthat.ai/brands/langfuse/pricing
+  - NeMo Guardrails:
+        https://github.com/NVIDIA-NeMo/Guardrails
+        https://arxiv.org/abs/2310.10501
+  - Lakera Guard vs NeMo:
+        https://aisecurityandsafety.org/en/compare/nemo-guardrails-vs-lakera-guard/
+        https://aisecurityandsafety.org/en/guides/llm-guardrails/
+  - Domain-specialized model trend:
+        https://cogentinfo.com/resources/domain-specific-language-models-dslms-the-end-of-the-general-purpose-llm-hype-in-2026
+        https://brimlabs.ai/blog/how-to-build-domain-specific-llm-pipelines-for-finance-healthcare-and-legal-workflows/
+  - Trident-Bench (LLM safety in finance / medicine / law):
+        https://arxiv.org/pdf/2507.21134
+        https://openreview.net/pdf/2bde8cbeae70ac438c261af346a6f25640a30b12.pdf
+  - Multi-agent evaluation, agent eval frameworks:
+        https://galileo.ai/blog/agent-evaluation-framework-metrics-rubrics-benchmarks
+        https://machinelearningmastery.com/7-agentic-ai-trends-to-watch-in-2026/
+        https://arxiv.org/abs/2503.16416
+        https://aws.amazon.com/blogs/machine-learning/evaluating-ai-agents-real-world-lessons-from-building-agentic-systems-at-amazon/
+  - Drift monitoring / false-positive issues:
+        https://www.fiddler.ai/blog/how-to-monitor-llmops-performance-with-drift
+        https://www.statsig.com/perspectives/model-drift-detection-methods-metrics
+        https://proofademic.ai/blog/false-positives-ai-detection-guide/
+  - Prompt injection statistics 2026:
+        https://sqmagazine.co.uk/prompt-injection-statistics/
+
+================================================================================

@@ -1,12 +1,26 @@
 """
-Prompt Validator — Amazon Bedrock AgentCore Runtime
+Worker Lambda — single function that runs the full scoring + refinement loop.
 
-Hosted on AWS::BedrockAgentCore::Runtime (managed Docker container via ECR).
-Receives JSON payloads from apv-invoker-lambda via POST /invocations.
+Replaces the previous architecture of Step Functions + AgentCore Runtime + Invoker
+Lambda + Aggregator Lambda + Refinement Lambda. All orchestration is now in this
+Python file.
 
-Payload shapes:
-  { action_type: "score",  prompt_id, prompt, domain, iteration }
-  { action_type: "refine", prompt_id, prompt, domain, iteration, aggregator?, review? }
+Two entry actions:
+  - action = "score"           : start scoring at iteration 0 (called when a new
+                                 prompt is submitted)
+  - action = "review_resume"   : continue after a human review action
+                                 (approve / reject / edit)
+
+Internal loop:
+  for each iteration (up to MAX_ITER):
+    1. Run 3 scoring tools in parallel + suggester
+    2. Run verify_fix (Haiku confidence check)
+    3. Decide: approve / refine / review
+    4. If approve: mark approved in DDB, return
+    5. If review:  mark awaiting_review in DDB, return (worker exits)
+    6. If refine:
+         - If iteration cap reached → force review, return
+         - Else: LLM rewrite → persist diff → continue loop with new prompt
 """
 import concurrent.futures as cf
 import json
@@ -15,21 +29,20 @@ import re
 import time
 
 import boto3
-from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 model_rt = boto3.client("bedrock-runtime")
 s3 = boto3.client("s3")
 ddb = boto3.client("dynamodb")
 
-BUCKET = os.environ["BUCKET_NAME"]
 TABLE = os.environ["TABLE_NAME"]
+BUCKET = os.environ["BUCKET_NAME"]
 HAIKU = os.environ["HAIKU_MODEL"]
 SONNET = os.environ["SONNET_MODEL"]
+MAX_ITER = int(os.environ.get("MAX_REFINEMENT_ITERATIONS", "3"))
 
 WEIGHTS = {"token": 0.25, "clarity": 0.35, "safety": 0.40}
 
 MODEL_PROFILES = {
-    # ── Anthropic ──────────────────────────────────────────────────────────────
     "claude-opus-4": {
         "display": "Claude Opus 4", "family": "claude",
         "context_window": 200000, "guardrail_strength": "strong",
@@ -54,7 +67,6 @@ MODEL_PROFILES = {
         "format_preferences": ["XML tags for structure", "natural language", "markdown"],
         "known_weaknesses": [],
     },
-    # ── OpenAI ─────────────────────────────────────────────────────────────────
     "gpt-4.1": {
         "display": "GPT-4.1", "family": "openai",
         "context_window": 1047576, "guardrail_strength": "strong",
@@ -89,46 +101,14 @@ MODEL_PROFILES = {
     },
     "gpt-4o-mini": {
         "display": "GPT-4o mini", "family": "openai",
-        "context_window": 128000, "guardrail_strength": "moderate",
-        "format_preferences": ["numbered steps", "explicit format specs", "markdown"],
-        "known_weaknesses": ["more susceptible to role-play jailbreaks than GPT-4o"],
-    },
-    # ── Meta ───────────────────────────────────────────────────────────────────
-    "llama-4-maverick": {
-        "display": "Llama 4 Maverick", "family": "llama",
-        "context_window": 1000000, "guardrail_strength": "weak",
-        "format_preferences": ["natural conversational prompts", "multimodal capable"],
-        "known_weaknesses": ["no built-in safety filters",
-                             "injection and harmful content not blocked at runtime",
-                             "susceptible to role-play jailbreaks"],
-    },
-    "llama-4-scout": {
-        "display": "Llama 4 Scout", "family": "llama",
-        "context_window": 10000000, "guardrail_strength": "weak",
-        "format_preferences": ["direct instructions", "extremely long context capable"],
-        "known_weaknesses": ["no safety filters",
-                             "10M token context but weak guardrails",
-                             "injection patterns are not auto-blocked at runtime"],
-    },
-    "llama-3.1-70b": {
-        "display": "Llama 3.1 70B", "family": "llama",
-        "context_window": 128000, "guardrail_strength": "weak",
-        "format_preferences": ["direct flat instructions", "avoid XML tags", "simple structure"],
-        "known_weaknesses": ["no built-in safety filters",
-                             "susceptible to role-play jailbreaks",
-                             "injection patterns are not auto-blocked at runtime"],
-    },
-    # ── Google ─────────────────────────────────────────────────────────────────
-    "gemini-2.5-pro": {
-        "display": "Gemini 2.5 Pro", "family": "gemini",
-        "context_window": 1000000, "guardrail_strength": "strong",
-        "format_preferences": ["natural language", "deep reasoning", "long-context analysis"],
+        "context_window": 128000, "guardrail_strength": "strong",
+        "format_preferences": ["concise instructions", "structured tasks"],
         "known_weaknesses": [],
     },
-    "gemini-2.5-flash": {
-        "display": "Gemini 2.5 Flash", "family": "gemini",
-        "context_window": 1000000, "guardrail_strength": "strong",
-        "format_preferences": ["concise natural language", "fast multimodal tasks"],
+    "gemini-2.5-pro": {
+        "display": "Gemini 2.5 Pro", "family": "gemini",
+        "context_window": 2000000, "guardrail_strength": "strong",
+        "format_preferences": ["natural language", "long context tasks", "multimodal"],
         "known_weaknesses": [],
     },
     "gemini-2.0-flash": {
@@ -143,7 +123,6 @@ MODEL_PROFILES = {
         "format_preferences": ["natural language", "markdown", "handles long context well"],
         "known_weaknesses": [],
     },
-    # ── Mistral ────────────────────────────────────────────────────────────────
     "mistral-large-2": {
         "display": "Mistral Large 2", "family": "mistral",
         "context_window": 128000, "guardrail_strength": "moderate",
@@ -278,31 +257,124 @@ RULES:
 OUTPUT: The rewritten prompt text ONLY. No preamble. No fences. No quotes."""
 
 
-# ------------------------------------------------------------------ AgentCore app
+# ================================================================== entry
 
-app = BedrockAgentCoreApp()
+def lambda_handler(event, _ctx):
+    action = event.get("action") or "score"
+
+    try:
+        if action == "score":
+            return _run_loop(
+                prompt_id=event["prompt_id"],
+                prompt=event["prompt"],
+                domain=event["domain"],
+                target_model=event.get("target_model", ""),
+                start_iter=int(event.get("iteration", 0)),
+            )
+        if action == "review_resume":
+            return _handle_review_resume(event)
+        return {"error": f"unknown action: {action}"}
+    except Exception as e:  # noqa: BLE001
+        prompt_id = event.get("prompt_id", "?")
+        print(f"[worker:fatal] prompt_id={prompt_id} action={action} error={e!r}")
+        if event.get("prompt_id"):
+            try:
+                _mark_status(event["prompt_id"], "error", str(e)[:500])
+            except Exception:
+                pass
+        raise
 
 
-@app.entrypoint
-def handle(payload: dict, context=None) -> dict:
-    action_type = payload.get("action_type", "score")
-    if action_type == "refine":
-        return _handle_refine(payload)
-    return _handle_score(payload)
+# ================================================================== orchestration
+
+def _run_loop(prompt_id: str, prompt: str, domain: str, target_model: str, start_iter: int = 0):
+    """Run scoring → (refine → scoring) up to MAX_ITER times, then route."""
+    print(f"[worker:loop] prompt_id={prompt_id} start_iter={start_iter} domain={domain}")
+    iteration = start_iter
+
+    while iteration < MAX_ITER:
+        score_result = _do_score(prompt_id, prompt, domain, iteration, target_model)
+        action = score_result["action"]
+
+        if action == "approve":
+            _mark_status(prompt_id, "approved")
+            return {"status": "approved", "iterations": iteration + 1}
+
+        if action == "review":
+            _mark_status(prompt_id, "awaiting_review")
+            return {"status": "awaiting_review", "iterations": iteration + 1}
+
+        # action == "refine"
+        next_iter = iteration + 1
+        if next_iter >= MAX_ITER:
+            print(f"[worker:loop] cap reached at iter={iteration}; forcing review")
+            _mark_status(prompt_id, "awaiting_review")
+            return {"status": "awaiting_review", "iterations": next_iter, "reason": "max_iterations"}
+
+        refine_result = _do_refine(
+            prompt_id=prompt_id,
+            prompt=prompt,
+            domain=domain,
+            iteration=iteration,
+            target_model=target_model,
+            aggregator={"scores": score_result.get("scores", {}), "flags": score_result.get("flags", [])},
+            edited_prompt=None,
+        )
+        prompt = refine_result["refined_prompt"]
+        iteration = refine_result["iteration"]
+
+    _mark_status(prompt_id, "awaiting_review")
+    return {"status": "awaiting_review", "iterations": iteration}
 
 
-# ------------------------------------------------------------------ score path
+def _handle_review_resume(event):
+    """Resume after human review action (approve / reject / edit)."""
+    prompt_id = event["prompt_id"]
+    review_action = event["review_action"]
 
-def _handle_score(payload: dict) -> dict:
-    prompt_id = payload["prompt_id"]
-    prompt = payload["prompt"]
-    domain = payload["domain"]
-    iteration = int(payload.get("iteration", 0))
+    if review_action == "approve":
+        _mark_status(prompt_id, "approved", final_action="approve")
+        return {"status": "approved"}
+    if review_action == "reject":
+        _mark_status(prompt_id, "rejected", final_action="reject")
+        return {"status": "rejected"}
+    if review_action == "edit":
+        edited = (event.get("edited_prompt") or "").strip()
+        if not edited:
+            return {"error": "edited_prompt required for edit"}
+        meta = _load_meta(prompt_id)
+        if not meta:
+            return {"error": "prompt not found"}
+        domain = meta.get("domain", "general")
+        target_model = meta.get("target_model", "")
+        last_iter = int(meta.get("latest_iteration", 0) or 0)
+        current_prompt = meta.get("current_prompt", "")
 
-    target_model = payload.get("target_model", "")
+        refine_result = _do_refine(
+            prompt_id=prompt_id,
+            prompt=current_prompt,
+            domain=domain,
+            iteration=last_iter,
+            target_model=target_model,
+            aggregator={},
+            edited_prompt=edited,
+        )
+        return _run_loop(
+            prompt_id=prompt_id,
+            prompt=refine_result["refined_prompt"],
+            domain=domain,
+            target_model=target_model,
+            start_iter=refine_result["iteration"],
+        )
+
+    return {"error": f"unknown review_action: {review_action}"}
+
+
+# ================================================================== score path
+
+def _do_score(prompt_id: str, prompt: str, domain: str, iteration: int, target_model: str = ""):
     model_profile = MODEL_PROFILES.get(target_model, {})
-
-    print(f"[agentcore:score] prompt_id={prompt_id} iter={iteration} domain={domain} model={target_model or 'generic'}")
+    print(f"[worker:score] prompt_id={prompt_id} iter={iteration} model={target_model or 'generic'}")
 
     rules = _load_domain_rules(domain)
     scores, suggestion, call_usage = _run_tools_parallel(prompt, domain, rules, model_profile)
@@ -312,7 +384,6 @@ def _handle_score(payload: dict) -> dict:
     flags = _collect_flags(scores)
     confidence, verify_usage = _verify_fix(prompt, domain, scores, composite)
     call_usage["verify_fix"] = verify_usage
-    similar = _similar_approved(domain)
 
     if composite >= 0.85 and severity == "LOW" and confidence >= 0.7:
         action = "approve"
@@ -323,8 +394,7 @@ def _handle_score(payload: dict) -> dict:
 
     _persist_score(prompt_id, iteration, scores, composite, severity, flags,
                    confidence, action, suggestion, call_usage)
-
-    print(f"[agentcore:score] action={action} composite={composite} severity={severity}")
+    print(f"[worker:score] action={action} composite={composite} severity={severity} confidence={confidence}")
 
     return {
         "action": action,
@@ -333,43 +403,31 @@ def _handle_score(payload: dict) -> dict:
         "severity": severity,
         "scores": scores,
         "flags": flags,
-        "similar_approved": similar,
         "suggestion": suggestion,
     }
 
 
-# ------------------------------------------------------------------ refine path
+# ================================================================== refine path
 
-def _handle_refine(payload: dict) -> dict:
-    prompt_id = payload["prompt_id"]
-    prompt = payload["prompt"]
-    domain = payload["domain"]
-    iteration = int(payload.get("iteration", 0))
-    aggregator = payload.get("aggregator") or {}
-    review = payload.get("review") or {}
-
+def _do_refine(prompt_id: str, prompt: str, domain: str, iteration: int,
+               target_model: str, aggregator: dict, edited_prompt: str = None):
     next_iter = iteration + 1
-    edited = (review.get("edited_prompt") or "").strip() if isinstance(review, dict) else ""
-
-    target_model = payload.get("target_model", "")
-    model_profile = MODEL_PROFILES.get(target_model, {})
-
-    if edited:
-        refined = edited
+    if edited_prompt:
+        refined = edited_prompt
         source = "human_edit"
         usage = None
     else:
         rules = _load_domain_rules(domain)
+        model_profile = MODEL_PROFILES.get(target_model, {})
         refined, usage = _llm_rewrite(prompt, domain, aggregator, rules, model_profile)
         source = "llm_refine"
 
     _persist_refine(prompt_id, next_iter, prompt, refined, source, aggregator, usage)
-    print(f"[agentcore:refine] prompt_id={prompt_id} iter→{next_iter} source={source}")
-
+    print(f"[worker:refine] prompt_id={prompt_id} iter→{next_iter} source={source}")
     return {"refined_prompt": refined, "iteration": next_iter}
 
 
-# ------------------------------------------------------------------ domain rules
+# ================================================================== domain rules
 
 def _model_context(profile: dict) -> str:
     if not profile:
@@ -429,7 +487,7 @@ def _rules_context(domain: str, rules: dict) -> str:
     )
 
 
-# ------------------------------------------------------------------ specialist tools
+# ================================================================== specialist tools
 
 def _token_check(prompt: str, domain: str, rules: dict, model_profile: dict = None):
     user_msg = (f"Domain: {domain}{_rules_context(domain, rules)}{_model_context(model_profile or {})}\n\n"
@@ -437,7 +495,7 @@ def _token_check(prompt: str, domain: str, rules: dict, model_profile: dict = No
     text, usage = _converse(HAIKU, TOKEN_SYSTEM, user_msg, max_tokens=1500, force_json=True)
     parsed = _safe_json(text)
     if parsed is None:
-        print(f"[agentcore] token parse failed raw={text[:300]!r}")
+        print(f"[worker] token parse failed raw={text[:300]!r}")
         return {"score": 0.5, "severity": "MED", "issues": [], "suggestions": []}, usage
     parsed.setdefault("score", 0.5)
     parsed.setdefault("severity", "MED")
@@ -450,7 +508,7 @@ def _clarity_check(prompt: str, domain: str, rules: dict, model_profile: dict = 
     text, usage = _converse(SONNET, CLARITY_SYSTEM, user_msg, max_tokens=1500, force_json=True)
     parsed = _safe_json(text)
     if parsed is None:
-        print(f"[agentcore] clarity parse failed raw={text[:300]!r}")
+        print(f"[worker] clarity parse failed raw={text[:300]!r}")
         return {"score": 0.5, "severity": "MED", "issues": [], "suggestions": [],
                 "intent_clear": None, "format_specified": None}, usage
     parsed.setdefault("score", 0.5)
@@ -464,7 +522,7 @@ def _safety_check(prompt: str, domain: str, rules: dict, model_profile: dict = N
     text, usage = _converse(SONNET, SAFETY_SYSTEM, user_msg, max_tokens=1500, force_json=True)
     parsed = _safe_json(text)
     if parsed is None:
-        print(f"[agentcore] safety parse failed raw={text[:300]!r}")
+        print(f"[worker] safety parse failed raw={text[:300]!r}")
         return {"score": 0.5, "severity": "MED", "issues": [], "suggestions": [],
                 "pii_found": False, "injection_risk": False,
                 "bias_risk": False, "compliance_flag": False}, usage
@@ -474,7 +532,6 @@ def _safety_check(prompt: str, domain: str, rules: dict, model_profile: dict = N
 
 
 def _build_scorer_findings(scores: dict) -> str:
-    """Serialize scorer results into a concise block for the suggester's user message."""
     lines = []
     for name, data in scores.items():
         header = f"[{name.upper()} — score={data.get('score', '?')}, severity={data.get('severity', '?')}]"
@@ -520,13 +577,11 @@ def _suggest(prompt: str, domain: str, rules: dict, scorer_findings: str = "", m
 
 
 def _run_tools_parallel(prompt: str, domain: str, rules: dict, model_profile: dict = None):
-    """Phase 1: run 3 scorers in parallel. Phase 2: run suggester with their findings."""
     model_profile = model_profile or {}
     scores = {}
     suggestion = ""
     call_usage = {}
 
-    # Phase 1 — scorers in parallel, each receives model profile context
     tool_fns = {
         "token":   lambda: _token_check(prompt, domain, rules, model_profile),
         "clarity": lambda: _clarity_check(prompt, domain, rules, model_profile),
@@ -541,21 +596,18 @@ def _run_tools_parallel(prompt: str, domain: str, rules: dict, model_profile: di
                 scores[name] = result
                 call_usage[name] = usage
             except Exception as e:
-                print(f"[agentcore] {name} tool failed: {e!r}")
+                print(f"[worker] {name} tool failed: {e!r}")
                 scores[name] = {"score": 0.0, "severity": "HIGH", "issues": [f"tool error: {e}"]}
 
-    # Phase 2 — suggester with scorer findings + model profile injected
     try:
         suggestion, sugg_usage = _suggest(prompt, domain, rules, _build_scorer_findings(scores), model_profile)
         call_usage["suggest"] = sugg_usage
     except Exception as e:
-        print(f"[agentcore] suggest failed: {e!r}")
+        print(f"[worker] suggest failed: {e!r}")
         suggestion = ""
 
     return scores, suggestion, call_usage
 
-
-# ------------------------------------------------------------------ verify_fix
 
 def _verify_fix(prompt: str, domain: str, scores: dict, composite: float):
     user_msg = (
@@ -569,11 +621,9 @@ def _verify_fix(prompt: str, domain: str, scores: dict, composite: float):
         parsed = _safe_json(text) or {}
         return float(parsed.get("confidence", 0.5)), usage
     except Exception as e:
-        print(f"[agentcore] verify_fix failed: {e!r}")
+        print(f"[worker] verify_fix failed: {e!r}")
         return 0.5, empty_usage
 
-
-# ------------------------------------------------------------------ refine tool
 
 def _llm_rewrite(prompt: str, domain: str, aggregator: dict, rules: dict, model_profile: dict = None):
     flags = aggregator.get("flags") or []
@@ -589,7 +639,7 @@ def _llm_rewrite(prompt: str, domain: str, aggregator: dict, rules: dict, model_
     return text.strip(), usage
 
 
-# ------------------------------------------------------------------ scoring helpers
+# ================================================================== scoring helpers
 
 def _composite(scores: dict) -> float:
     total = 0.0
@@ -616,34 +666,7 @@ def _collect_flags(scores: dict) -> list:
     return flags
 
 
-# ------------------------------------------------------------------ similar lookup
-
-def _similar_approved(domain: str) -> list:
-    try:
-        res = ddb.query(
-            TableName=TABLE,
-            IndexName="GSI1_status",
-            KeyConditionExpression="gsi1pk = :s",
-            ExpressionAttributeValues={":s": {"S": "approved"}},
-            ScanIndexForward=False,
-            Limit=20,
-        )
-        out = []
-        for item in res.get("Items", []):
-            if item.get("domain", {}).get("S") == domain:
-                out.append({
-                    "prompt_id": item["pk"]["S"],
-                    "prompt": item.get("current_prompt", {}).get("S", ""),
-                })
-            if len(out) >= 5:
-                break
-        return out
-    except Exception as e:
-        print(f"[agentcore] similar lookup failed: {e!r}")
-        return []
-
-
-# ------------------------------------------------------------------ persistence
+# ================================================================== persistence
 
 def _build_usage_bundle(call_usage: dict) -> str:
     total = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
@@ -739,8 +762,7 @@ def _persist_refine(prompt_id, iteration, before, after, source, aggregator, usa
         "created_at": {"N": str(now_ms)},
     }
     if usage:
-        call_usage = {"llm_refine": usage}
-        item["usage_tokens"] = {"S": _build_usage_bundle(call_usage)}
+        item["usage_tokens"] = {"S": _build_usage_bundle({"llm_refine": usage})}
 
     ddb.put_item(TableName=TABLE, Item=item)
     ddb.update_item(
@@ -751,7 +773,60 @@ def _persist_refine(prompt_id, iteration, before, after, source, aggregator, usa
     )
 
 
-# ------------------------------------------------------------------ Bedrock converse
+# ================================================================== status mutators
+
+def _mark_status(prompt_id: str, status: str, error: str = None, final_action: str = None):
+    """Update META.status (and gsi1pk for the queue) atomically."""
+    iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    set_parts = ["#st = :s", "gsi1pk = :g", "gsi1sk = :t"]
+    values = {
+        ":s": {"S": status},
+        ":g": {"S": status},
+        ":t": {"S": iso},
+    }
+    names = {"#st": "status"}
+    if final_action:
+        set_parts.append("final_action = :fa")
+        values[":fa"] = {"S": final_action}
+    if error:
+        set_parts.append("error_message = :em")
+        values[":em"] = {"S": error}
+
+    ddb.update_item(
+        TableName=TABLE,
+        Key={"pk": {"S": prompt_id}, "sk": {"S": "META"}},
+        UpdateExpression="SET " + ", ".join(set_parts),
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+
+
+def _load_meta(prompt_id: str) -> dict:
+    res = ddb.get_item(
+        TableName=TABLE,
+        Key={"pk": {"S": prompt_id}, "sk": {"S": "META"}},
+    )
+    item = res.get("Item")
+    if not item:
+        return {}
+    return {k: _from_attr(v) for k, v in item.items()}
+
+
+def _from_attr(v):
+    if "S" in v:
+        return v["S"]
+    if "N" in v:
+        n = v["N"]
+        return float(n) if "." in n else int(n)
+    if "BOOL" in v:
+        return v["BOOL"]
+    if "NULL" in v:
+        return None
+    return None
+
+
+# ================================================================== Bedrock converse
 
 def _converse(model_id: str, system_prompt: str, user_msg: str,
               max_tokens: int = 800, force_json: bool = False):
@@ -773,37 +848,31 @@ def _converse(model_id: str, system_prompt: str, user_msg: str,
     print(f"[converse] {model_name} len={len(text)}")
 
     u = resp.get("usage", {})
-    usage = {
+    return text, {
         "model":              model_name,
         "input_tokens":       u.get("inputTokens", 0),
         "output_tokens":      u.get("outputTokens", 0),
         "cache_read_tokens":  u.get("cacheReadInputTokens", 0),
         "cache_write_tokens": u.get("cacheWriteInputTokens", 0),
     }
-    return text, usage
 
 
-# ------------------------------------------------------------------ utils
+# ================================================================== utils
 
 def _safe_json(text: str):
     if not text:
         return None
-    # Strip markdown fences (opening and closing)
     cleaned = re.sub(r"```(?:json)?\s*", "", text).strip()
     cleaned = re.sub(r"\s*```$", "", cleaned).strip()
-    # Direct parse
     try:
         return json.loads(cleaned)
     except Exception:
         pass
-    # When force_json prefills "{" and the model also echoes "{", we get "{{...}".
-    # Try stripping leading duplicate braces.
     if cleaned.startswith("{{"):
         try:
             return json.loads(cleaned[1:])
         except Exception:
             pass
-    # Depth-tracked extraction: find the first complete {...} block
     start = cleaned.find("{")
     if start >= 0:
         depth = 0
@@ -817,9 +886,7 @@ def _safe_json(text: str):
                     try:
                         return json.loads(candidate)
                     except Exception:
-                        # Try every subsequent "{" as a new start point
                         break
-        # Try each "{" position as a potential JSON start
         for s in range(start + 1, len(cleaned)):
             if cleaned[s] == "{":
                 depth = 0
@@ -838,9 +905,3 @@ def _safe_json(text: str):
 
 def _approx_tokens(s: str) -> int:
     return int(len(s.split()) * 1.3)
-
-
-# ------------------------------------------------------------------ entrypoint
-
-if __name__ == "__main__":
-    app.run()

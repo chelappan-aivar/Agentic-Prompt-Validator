@@ -1,9 +1,10 @@
 """
 Intake Lambda — handles all REST API routes:
-  POST /prompts                    submit a new prompt
-  GET  /prompts?status=...         list prompts (default: awaiting_review)
-  GET  /prompts/{id}               get one prompt with all sub-records
-  POST /prompts/{id}/review        human review action (approve|reject|edit)
+  POST   /prompts                    submit a new prompt
+  GET    /prompts?status=...         list prompts (default: awaiting_review)
+  GET    /prompts/{id}               get one prompt with all sub-records
+  POST   /prompts/{id}/review        human review action (approve|reject|edit)
+  DELETE /prompts/{id}               permanently delete a prompt and all its records
 """
 import json
 import os
@@ -22,7 +23,7 @@ SM_ARN = os.environ["STATE_MACHINE_ARN"]
 
 CORS = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type,Authorization",
 }
 
@@ -53,6 +54,8 @@ def lambda_handler(event, _ctx):
             return get_prompt(pp["id"])
         if method == "POST" and resource == "/prompts/{id}/review":
             return review(pp["id"], body)
+        if method == "DELETE" and resource == "/prompts/{id}":
+            return delete_prompt(pp["id"])
         return _resp(404, {"error": "not found"})
     except Exception as e:  # noqa: BLE001
         print(f"intake error: {e!r}")
@@ -65,6 +68,8 @@ def submit(body):
     if not prompt or not domain:
         return _resp(400, {"error": "prompt and domain required"})
 
+    target_model = (body.get("target_model") or "").strip()
+
     prompt_id = str(uuid.uuid4())
     now_ms = int(time.time() * 1000)
 
@@ -75,26 +80,28 @@ def submit(body):
         ContentType="text/plain",
     )
 
-    ddb.put_item(
-        TableName=TABLE,
-        Item={
-            "pk": {"S": prompt_id},
-            "sk": {"S": "META"},
-            "status": {"S": "processing"},
-            "gsi1pk": {"S": "processing"},
-            "gsi1sk": {"S": _ms_to_iso(now_ms)},
-            "domain": {"S": domain},
-            "original_prompt": {"S": prompt},
-            "current_prompt": {"S": prompt},
-            "created_at": {"N": str(now_ms)},
-        },
-    )
+    item = {
+        "pk": {"S": prompt_id},
+        "sk": {"S": "META"},
+        "status": {"S": "processing"},
+        "gsi1pk": {"S": "processing"},
+        "gsi1sk": {"S": _ms_to_iso(now_ms)},
+        "domain": {"S": domain},
+        "original_prompt": {"S": prompt},
+        "current_prompt": {"S": prompt},
+        "created_at": {"N": str(now_ms)},
+    }
+    if target_model:
+        item["target_model"] = {"S": target_model}
+
+    ddb.put_item(TableName=TABLE, Item=item)
 
     sfn.start_execution(
         stateMachineArn=SM_ARN,
         name=prompt_id,
         input=json.dumps(
-            {"prompt_id": prompt_id, "prompt": prompt, "domain": domain, "iteration": 0}
+            {"prompt_id": prompt_id, "prompt": prompt, "domain": domain,
+             "iteration": 0, "target_model": target_model}
         ),
     )
 
@@ -155,12 +162,59 @@ def review(prompt_id, body):
 
     task_token = item.get("task_token", {}).get("S")
     if not task_token:
-        return _resp(409, {"error": "no pending review for this prompt"})
+        # No task token — already processed or token expired.
+        # If status is still awaiting_review (stale entry), move it out of the queue.
+        current_status = item.get("status", {}).get("S", "")
+        if current_status == "awaiting_review":
+            now_ms = int(time.time() * 1000)
+            ddb.update_item(
+                TableName=TABLE,
+                Key={"pk": {"S": prompt_id}, "sk": {"S": "META"}},
+                UpdateExpression="SET #st = :s, gsi1pk = :g, gsi1sk = :t",
+                ExpressionAttributeNames={"#st": "status"},
+                ExpressionAttributeValues={
+                    ":s": {"S": "rejected"},
+                    ":g": {"S": "rejected"},
+                    ":t": {"S": _ms_to_iso(now_ms)},
+                },
+            )
+        return _resp(200, {"ok": True})
 
-    sfn.send_task_success(
-        taskToken=task_token,
-        output=json.dumps({"action": action, "edited_prompt": edited or None}),
-    )
+    try:
+        sfn.send_task_success(
+            taskToken=task_token,
+            output=json.dumps({"action": action, "edited_prompt": edited or None}),
+        )
+    except sfn.exceptions.TaskTimedOut:
+        print(f"[intake] task token expired for prompt_id={prompt_id}, cleaning up")
+        now_ms = int(time.time() * 1000)
+        ddb.update_item(
+            TableName=TABLE,
+            Key={"pk": {"S": prompt_id}, "sk": {"S": "META"}},
+            UpdateExpression="SET #st = :s, gsi1pk = :g, gsi1sk = :t REMOVE task_token",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":s": {"S": "rejected"},
+                ":g": {"S": "rejected"},
+                ":t": {"S": _ms_to_iso(now_ms)},
+            },
+        )
+        return _resp(200, {"ok": True})
+    except sfn.exceptions.TaskDoesNotExist:
+        print(f"[intake] task no longer exists for prompt_id={prompt_id}, cleaning up")
+        now_ms = int(time.time() * 1000)
+        ddb.update_item(
+            TableName=TABLE,
+            Key={"pk": {"S": prompt_id}, "sk": {"S": "META"}},
+            UpdateExpression="SET #st = :s, gsi1pk = :g, gsi1sk = :t REMOVE task_token",
+            ExpressionAttributeNames={"#st": "status"},
+            ExpressionAttributeValues={
+                ":s": {"S": "rejected"},
+                ":g": {"S": "rejected"},
+                ":t": {"S": _ms_to_iso(now_ms)},
+            },
+        )
+        return _resp(200, {"ok": True})
 
     ddb.update_item(
         TableName=TABLE,
@@ -168,6 +222,55 @@ def review(prompt_id, body):
         UpdateExpression="REMOVE task_token",
     )
     return _resp(200, {"ok": True})
+
+
+def delete_prompt(prompt_id):
+    paginator = ddb.get_paginator("query")
+    items = []
+    for page in paginator.paginate(
+        TableName=TABLE,
+        KeyConditionExpression="pk = :p",
+        ExpressionAttributeValues={":p": {"S": prompt_id}},
+    ):
+        items.extend(page["Items"])
+    if not items:
+        return _resp(404, {"error": "not found"})
+
+    meta = next((i for i in items if i.get("sk", {}).get("S") == "META"), None)
+    if meta:
+        task_token = meta.get("task_token", {}).get("S")
+        if task_token:
+            try:
+                sfn.send_task_failure(
+                    taskToken=task_token,
+                    error="Deleted",
+                    cause="Prompt deleted by user",
+                )
+            except Exception as e:  # noqa: BLE001
+                print(f"[intake] failed to release task token for {prompt_id}: {e!r}")
+
+    for i in range(0, len(items), 25):
+        batch = items[i:i + 25]
+        ddb.batch_write_item(
+            RequestItems={
+                TABLE: [
+                    {"DeleteRequest": {"Key": {"pk": it["pk"], "sk": it["sk"]}}}
+                    for it in batch
+                ]
+            }
+        )
+
+    s3_paginator = s3.get_paginator("list_objects_v2")
+    s3_keys = []
+    for page in s3_paginator.paginate(Bucket=BUCKET, Prefix=f"prompts/{prompt_id}/"):
+        for obj in page.get("Contents", []) or []:
+            s3_keys.append({"Key": obj["Key"]})
+    for i in range(0, len(s3_keys), 1000):
+        chunk = s3_keys[i:i + 1000]
+        if chunk:
+            s3.delete_objects(Bucket=BUCKET, Delete={"Objects": chunk, "Quiet": True})
+
+    return _resp(200, {"ok": True, "deleted_records": len(items), "deleted_objects": len(s3_keys)})
 
 
 # ----- helpers -----

@@ -1,29 +1,7 @@
-# Dependencies
-node_modules/
-
-# Next.js
-.next/
-out/
-
-# CDK
-cdk.out/
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.env
+node_modules
+cdk.out
+.next
+*.tsbuildinfo
 .env.local
-.env.*.local
+.env
 
-# OS / editor
-.DS_Store
-*.swp
-.idea/
-.vscode/
-
-# Logs / caches
-*.log
-.npm/
-.turbo/
