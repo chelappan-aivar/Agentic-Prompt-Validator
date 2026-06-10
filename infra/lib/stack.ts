@@ -6,10 +6,11 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigw from 'aws-cdk-lib/aws-apigateway';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as path from 'path';
 
-const DEFAULT_HAIKU  = 'us.anthropic.claude-haiku-4-5-20251001-v1:0';
-const DEFAULT_SONNET = 'us.anthropic.claude-sonnet-4-5-20250929-v1:0';
+const DEFAULT_HAIKU  = 'claude-haiku-4.5';
+const DEFAULT_SONNET = 'claude-sonnet-4.5';
 
 /**
  * Agentic Prompt Validator — 2-Lambda architecture.
@@ -70,9 +71,11 @@ export class PromptValidatorStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
       managedPolicies: [basicExec],
     });
-    const bedrockPolicy = new iam.PolicyStatement({
-      actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
-      resources: ['*'],
+    const llmBaseUrl = (this.node.tryGetContext('llmBaseUrl') as string) || 'https://aigateway.aivar.app';
+
+    const llmApiKeySecret = new secretsmanager.Secret(this, 'LlmApiKeySecret', {
+      secretName: 'apv/llm-api-key',
+      description: 'API key for the AI gateway (aigateway.aivar.app)',
     });
 
     const coreEnv: Record<string, string> = {
@@ -81,19 +84,29 @@ export class PromptValidatorStack extends cdk.Stack {
       HAIKU_MODEL:               haikuModel,
       SONNET_MODEL:              sonnetModel,
       MAX_REFINEMENT_ITERATIONS: '3',
+      LLM_API_SECRET_ARN:        llmApiKeySecret.secretArn,
+      LLM_BASE_URL:              llmBaseUrl,
     };
 
     // ---------------------------------------------------------------- Worker Lambda
     // Runs the entire scoring + refinement loop. Invoked async by the API Lambda.
     const workerRole = mkRole('WorkerFnRole', 'apv-worker-lambda-role');
-    workerRole.addToPolicy(bedrockPolicy);
+    llmApiKeySecret.grantRead(workerRole);
 
     const workerFn = new lambda.Function(this, 'WorkerFn', {
       functionName: 'apv-worker-lambda',
       role: workerRole,
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.lambda_handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '..', '..', 'lambdas', 'worker')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '..', '..', 'lambdas', 'worker'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output',
+          ],
+        },
+      }),
       memorySize: 1024,
       timeout: cdk.Duration.minutes(10),
       environment: coreEnv,

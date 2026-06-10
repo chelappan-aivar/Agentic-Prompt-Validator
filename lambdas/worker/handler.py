@@ -29,10 +29,20 @@ import re
 import time
 
 import boto3
+import openai
 
-model_rt = boto3.client("bedrock-runtime")
 s3 = boto3.client("s3")
 ddb = boto3.client("dynamodb")
+_sm = boto3.client("secretsmanager")
+
+def _load_api_key() -> str:
+    resp = _sm.get_secret_value(SecretId=os.environ["LLM_API_SECRET_ARN"])
+    return resp["SecretString"]
+
+_llm = openai.OpenAI(
+    api_key=_load_api_key(),
+    base_url=os.environ.get("LLM_BASE_URL", "https://aigateway.aivar.app"),
+)
 
 TABLE = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET_NAME"]
@@ -826,34 +836,34 @@ def _from_attr(v):
     return None
 
 
-# ================================================================== Bedrock converse
+# ================================================================== OpenAI-compatible converse
 
 def _converse(model_id: str, system_prompt: str, user_msg: str,
               max_tokens: int = 800, force_json: bool = False):
-    messages = [{"role": "user", "content": [{"text": user_msg}]}]
+    kwargs = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_msg},
+        ],
+        "max_tokens": max_tokens,
+    }
     if force_json:
-        messages.append({"role": "assistant", "content": [{"text": "{"}]})
+        kwargs["response_format"] = {"type": "json_object"}
 
-    resp = model_rt.converse(
-        modelId=model_id,
-        system=[{"text": system_prompt}],
-        messages=messages,
-        inferenceConfig={"maxTokens": max_tokens},
-    )
-    text = resp["output"]["message"]["content"][0]["text"]
-    if force_json:
-        text = "{" + text
+    resp = _llm.chat.completions.create(**kwargs)
+    text = resp.choices[0].message.content or ""
 
     model_name = "haiku" if "haiku" in model_id.lower() else "sonnet"
     print(f"[converse] {model_name} len={len(text)}")
 
-    u = resp.get("usage", {})
+    u = resp.usage
     return text, {
         "model":              model_name,
-        "input_tokens":       u.get("inputTokens", 0),
-        "output_tokens":      u.get("outputTokens", 0),
-        "cache_read_tokens":  u.get("cacheReadInputTokens", 0),
-        "cache_write_tokens": u.get("cacheWriteInputTokens", 0),
+        "input_tokens":       getattr(u, "prompt_tokens", 0),
+        "output_tokens":      getattr(u, "completion_tokens", 0),
+        "cache_read_tokens":  0,
+        "cache_write_tokens": 0,
     }
 
 

@@ -4,24 +4,32 @@ Refinement Lambda — invoked by Step Functions when:
   (b) human reviewer chose "edit" (review.action == 'edit', review.edited_prompt provided).
 
 For (b) we use the human edit verbatim (no LLM call).
-For (a) we ask Sonnet to rewrite the prompt via bedrock-runtime.converse() with a
-cached system prompt (cacheControl: default) for ~90% cost reduction on repeated calls.
+For (a) we ask Sonnet to rewrite the prompt via the OpenAI-compatible AI gateway.
 """
 import json
 import os
 import time
 
 import boto3
+import openai
 
-model_rt = boto3.client("bedrock-runtime")
 ddb = boto3.client("dynamodb")
 s3 = boto3.client("s3")
+_sm = boto3.client("secretsmanager")
+
+def _load_api_key() -> str:
+    resp = _sm.get_secret_value(SecretId=os.environ["LLM_API_SECRET_ARN"])
+    return resp["SecretString"]
+
+_llm = openai.OpenAI(
+    api_key=_load_api_key(),
+    base_url=os.environ.get("LLM_BASE_URL", "https://aigateway.aivar.app"),
+)
 
 TABLE = os.environ["TABLE_NAME"]
 BUCKET = os.environ["BUCKET_NAME"]
 SONNET = os.environ["SONNET_MODEL"]
 
-# Static system prompt — cached at the Bedrock layer across repeated refinement calls.
 REFINE_SYSTEM = """You are an expert prompt engineer specialising in rewriting AI prompts for \
 production systems. You will receive a prompt that has been evaluated by automated reviewers \
 and flagged for improvement. Your task is to rewrite it so it scores higher on token efficiency, \
@@ -82,20 +90,22 @@ def _llm_rewrite(prompt, domain, aggregator):
         f"Reviewer scores: {json.dumps(scores)[:1500]}\n\n"
         "Rewritten prompt:"
     )
-    resp = model_rt.converse(
-        modelId=SONNET,
-        system=[{"text": REFINE_SYSTEM}],
-        messages=[{"role": "user", "content": [{"text": user_msg}]}],
-        inferenceConfig={"maxTokens": 2000},
+    resp = _llm.chat.completions.create(
+        model=SONNET,
+        messages=[
+            {"role": "system", "content": REFINE_SYSTEM},
+            {"role": "user",   "content": user_msg},
+        ],
+        max_tokens=2000,
     )
-    text = resp["output"]["message"]["content"][0]["text"].strip()
-    u = resp.get("usage", {})
+    text = (resp.choices[0].message.content or "").strip()
+    u = resp.usage
     usage = {
-        "model": "sonnet",
-        "input_tokens":       u.get("inputTokens", 0),
-        "output_tokens":      u.get("outputTokens", 0),
-        "cache_read_tokens":  u.get("cacheReadInputTokens", 0),
-        "cache_write_tokens": u.get("cacheWriteInputTokens", 0),
+        "model":              "sonnet",
+        "input_tokens":       getattr(u, "prompt_tokens", 0),
+        "output_tokens":      getattr(u, "completion_tokens", 0),
+        "cache_read_tokens":  0,
+        "cache_write_tokens": 0,
     }
     return text, usage
 
